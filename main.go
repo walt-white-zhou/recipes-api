@@ -7,6 +7,8 @@ import (
 	"os"
 	"recipes-api/handlers"
 
+	"github.com/gin-contrib/sessions"
+	redisStore "github.com/gin-contrib/sessions/redis"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -14,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+var authHandler *handlers.AuthHandler
 var recipesHandler *handlers.RecipesHandler
 
 func init() {
@@ -34,14 +37,38 @@ func init() {
 	fmt.Println(status)
 
 	recipesHandler = handlers.NewRecipesHandler(ctx, collection, redisClient)
-
+	collectionUsers := client.Database(os.Getenv("MONGO_DATABASE")).Collection("users")
+	authHandler = handlers.NewAuthHandler(ctx, collectionUsers)
 }
 
 func main() {
 	router := gin.Default()
-	router.POST("/recipes", recipesHandler.NewRecipeHandler)
+	store, _ := redisStore.NewStore(10, "tcp", "localhost:6379", "", []byte("secret"))
+	router.Use(sessions.Sessions("recipes_api", store))
 	router.GET("/recipes", recipesHandler.ListRecipeHandler)
-	router.PUT("/recipes/:id", recipesHandler.UpdateRecipeHandler)
+	router.POST("/signin", authHandler.SignInHandler)
+	router.POST("/refresh", authHandler.RefreshHandler)
+	router.POST("/signout", authHandler.SiginOutHandler)
+	authorized := router.Group("/")
+	authorized.Use(authHandler.AuthMiddleware())
+	{
+		authorized.POST("/recipes",
+
+			recipesHandler.NewRecipeHandler)
+
+		authorized.PUT("/recipes/:id",
+
+			recipesHandler.UpdateRecipeHandler)
+
+		authorized.DELETE("/recipes/:id",
+
+			recipesHandler.DeleteRecipeHandler)
+
+		authorized.GET("/recipes/:id",
+
+			recipesHandler.GetOneRecipeHandler)
+	}
+
 	// router.DELETE("/recipes/:id", DeleteRecipeHandler)
 	// router.GET("/recipes/search", SearchRecipesHandler)
 	router.Run()
